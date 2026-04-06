@@ -2,60 +2,46 @@ import os
 import hashlib
 from cryptography.fernet import Fernet
 
-CONFIG_FILE = ".env"
+ENV_PATH = ".env"
 
-def load_or_create_key():
-    """Загружает ключ из файла или создает новый, если файла нет."""
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r") as f:
-            for line in f:
-                if line.startswith("GAME_DATA_KEY="):
-                    return line.strip().split("=")[1].encode()
+def get_secret_key():
+    if os.path.exists(ENV_PATH):
+        with open(ENV_PATH, "r") as f:
+            content = f.read()
+            for line in content.splitlines():
+                if "GAME_DATA_KEY" in line:
+                    return line.split("=")[1].strip().encode()
+
+    key = Fernet.generate_key()
+    mode = "a" if os.path.exists(ENV_PATH) else "w"
+    with open(ENV_PATH, mode) as f:
+        f.write(f"\nGAME_DATA_KEY={key.decode()}\n")
     
-    new_key = Fernet.generate_key()
-    with open(CONFIG_FILE, "a") as f:
-        f.write(f"\nGAME_DATA_KEY={new_key.decode()}\n")
-    print(f"[INFO] Создан новый ключ в {CONFIG_FILE}. Добавьте этот файл в .gitignore!")
-    return new_key
+    print(f">> Created new key in {ENV_PATH}. Check your .gitignore!")
+    return key
 
-class GameSecurity:
-    def __init__(self, key: bytes):
-        self.cipher = Fernet(key)
+class Crypto:
+    def __init__(self, key):
+        self.f = Fernet(key)
 
     @staticmethod
-    def hash_password(password: str) -> str:
-        """Хеширование пароля через SHA-256 (необратимо)."""
-        return hashlib.sha256(password.encode()).hexdigest()
+    def quick_hash(text: str):
+        return hashlib.sha256(text.encode()).hexdigest()
 
-    def encrypt_traffic(self, data: str) -> bytes:
-        """Шифрование данных перед отправкой в сеть."""
-        return self.cipher.encrypt(data.encode())
+    def pack(self, data: str):
+        return self.f.encrypt(data.encode())
 
-    def decrypt_traffic(self, encrypted_bytes: bytes) -> str:
-        """Расшифровка полученных из сети данных."""
-        return self.cipher.decrypt(encrypted_bytes).decode()
+    def unpack(self, token: bytes):
+        return self.f.decrypt(token).decode()
 
 if __name__ == "__main__":
-    key = load_or_create_key()
-    security = GameSecurity(key)
-
-    print("-" * 30)
+    crypt = Crypto(get_secret_key())
     
-    raw_password = "player_secret_123"
-    hashed = security.hash_password(raw_password)
-    print(f"ПАРОЛЬ: {raw_password}")
-    print(f"ХЕШ ДЛЯ БАЗЫ (SHA-256): {hashed}")
+    pwd = "player_secret_123"
+    print(f"Hash: {crypt.quick_hash(pwd)}")
 
-    print("-" * 30)
-
-    game_data = '{"player_id": 42, "pos": [100, 250], "inventory": ["sword", "shield"]}'
-    print(f"ИСХОДНЫЕ ДАННЫЕ: {game_data}")
-
-    encrypted = security.encrypt_traffic(game_data)
-    print(f"ЗАШИФРОВАННЫЙ ТРАФИК (Fernet): {encrypted}")
-
-    decrypted = security.decrypt_traffic(encrypted)
-    print(f"РАСШИФРОВАННЫЕ ДАННЫЕ: {decrypted}")
-
-    print("-" * 30)
-    print("Внимание: Файл .env был изменен/создан. Не забудьте добавить его в .gitignore!")
+    payload = '{"id": 42, "items": ["sword", "shield"]}'
+    token = crypt.pack(payload)
+    
+    print(f"Encrypted: {token[:30]}...") 
+    print(f"Decrypted: {crypt.unpack(token)}")
